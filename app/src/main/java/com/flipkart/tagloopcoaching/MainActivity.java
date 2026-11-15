@@ -2,6 +2,7 @@ package com.flipkart.tagloopcoaching;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.view.View;
@@ -16,9 +17,13 @@ import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.Toast;
 
+import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+
+import com.google.zxing.integration.android.IntentIntegrator;
+import com.google.zxing.integration.android.IntentResult;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -34,7 +39,7 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // UI ইলিমেন্টগুলো লিঙ্ক করা
+        // UI ইলিমেন্ট লিঙ্ক
         toteInput = findViewById(R.id.toteInput);
         btnScan = findViewById(R.id.btnScan);
         btnGo = findViewById(R.id.btnGo);
@@ -42,12 +47,12 @@ public class MainActivity extends AppCompatActivity {
         webView = findViewById(R.id.webView);
         scannerSection = findViewById(R.id.scannerSection);
 
-        // ক্যামেরার পারমিশন নেওয়া
+        // ক্যামেরা পারমিশন
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.CAMERA}, 100);
         }
 
-        // WebView সেটআপ করা
+        // WebView সেটআপ
         WebSettings webSettings = webView.getSettings();
         webSettings.setJavaScriptEnabled(true);
         webSettings.setDomStorageEnabled(true);
@@ -61,8 +66,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
-                // যখন Apps Script-এর লিংকে যাবে, তখন স্ক্যানার লুকিয়ে যাবে
-                if (url.contains("script.google.com")) {
+                if (url != null && url.contains("script.google.com")) {
                     runOnUiThread(() -> {
                         scannerSection.setVisibility(View.GONE);
                         btnCloseChecking.setVisibility(View.VISIBLE);
@@ -71,10 +75,9 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // প্রথমে Flo-lite-এর লগইন পেজ লোড হবে
         webView.loadUrl("http://10.24.1.71");
 
-        // GO বাটনে ক্লিক করলে জাভাস্ক্রিপ্ট ইনজেক্ট হবে
+        // GO বাটনের লজিক
         btnGo.setOnClickListener(v -> {
             String toteId = toteInput.getText().toString().trim().toUpperCase();
             if (toteId.isEmpty()) {
@@ -84,21 +87,44 @@ public class MainActivity extends AppCompatActivity {
             injectMasterScript(toteId);
         });
 
-        // স্ক্যান বাটনের কাজ (পরের স্টেপে ZXing স্ক্যানার অ্যাড করব)
+        // স্ক্যান বাটনের লজিক (ZXing Scanner)
         btnScan.setOnClickListener(v -> {
-            Toast.makeText(this, "Scanner will be enabled in the next step!", Toast.LENGTH_SHORT).show();
+            IntentIntegrator integrator = new IntentIntegrator(MainActivity.this);
+            integrator.setDesiredBarcodeFormats(IntentIntegrator.ALL_CODE_TYPES);
+            integrator.setPrompt("Scan a Tote ID");
+            integrator.setCameraId(0);
+            integrator.setBeepEnabled(true);
+            integrator.setBarcodeImageEnabled(false);
+            integrator.setOrientationLocked(false);
+            integrator.initiateScan();
         });
 
-        // Close বাটনে ক্লিক করলে আবার নতুন স্ক্যানার আসবে
+        // Close বাটনের লজিক
         btnCloseChecking.setOnClickListener(v -> {
             scannerSection.setVisibility(View.VISIBLE);
             btnCloseChecking.setVisibility(View.GONE);
             toteInput.setText("");
-            webView.loadUrl("http://10.24.1.71"); // Flo-lite-এ ফেরত যাবে
+            webView.loadUrl("http://10.24.1.71");
         });
     }
 
-    // মাস্টার জাভাস্ক্রিপ্ট (Flo-lite + Kratos Tagloop Checker)
+    // স্ক্যানারের রেজাল্ট ধরা
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
+        IntentResult result = IntentIntegrator.parseActivityResult(requestCode, resultCode, data);
+        if (result != null) {
+            if (result.getContents() != null) {
+                String scannedId = result.getContents().trim();
+                toteInput.setText(scannedId);
+                // অপশনাল: স্ক্যান হলেই অটোমেটিক GO কল করতে চাইলে নিচের লাইনটা আনকমেন্ট করে দেবেন
+                // injectMasterScript(scannedId);
+            }
+        } else {
+            super.onActivityResult(requestCode, resultCode, data);
+        }
+    }
+
+    // মাস্টার জাভাস্ক্রিপ্ট ইনজেকশন
     private void injectMasterScript(String toteId) {
         String js = "javascript:(async function(){ " +
                 "try { " +
@@ -186,7 +212,6 @@ public class MainActivity extends AppCompatActivity {
         webView.evaluateJavascript(js, null);
     }
 
-    // জাভাস্ক্রিপ্ট থেকে মেসেজ পাওয়ার জন্য ইন্টারফেস
     public class WebAppInterface {
         @JavascriptInterface
         public void showLoading(String message) {
