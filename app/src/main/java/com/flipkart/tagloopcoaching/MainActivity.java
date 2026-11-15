@@ -5,6 +5,7 @@ import android.annotation.SuppressLint;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.view.View;
+import android.view.ViewGroup;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
@@ -25,13 +26,29 @@ import com.google.mlkit.vision.codescanner.GmsBarcodeScanner;
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions;
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.net.URLEncoder;
+import java.util.HashSet;
+
 public class MainActivity extends AppCompatActivity {
+
+    private static final String FLO_URL = "http://10.24.1.71/flo-lite/";
+    private static final String KRATOS_URL = "http://10.83.32.70/kratos/";
+    private static final String GAS_URL = "https://script.google.com/a/macros/flipkart.com/s/AKfycbzxNqnX1HrawsRVwBX33ZEscXY6OX-tomn4dPWEQLDtrfmv30q9gJFktJPtDE_5bpI_/exec";
 
     private EditText toteInput;
     private ImageButton btnScan;
     private Button btnGo, btnCloseChecking;
-    private WebView webView;
+    private WebView webView;       // Flo-lite (main, visible)
+    private WebView kratosView;    // Kratos (hidden, same-origin check)
     private LinearLayout scannerSection;
+
+    private JSONArray pendingItems;
+    private String pendingTote = "";
+    private String pendingPutlist = "";
+    private boolean checkStarted = false;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -50,12 +67,15 @@ public class MainActivity extends AppCompatActivity {
             ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.CAMERA}, 100);
         }
 
+        // PC Chrome এর chrome://inspect থেকে console দেখার জন্য
+        WebView.setWebContentsDebugging(true);
+
+        // ---------- Main WebView (Flo-lite) ----------
         WebSettings webSettings = webView.getSettings();
         webSettings.setJavaScriptEnabled(true);
         webSettings.setDomStorageEnabled(true);
         webSettings.setAllowFileAccess(true);
         webSettings.setMediaPlaybackRequiresUserGesture(false);
-        // এই লাইনটা খুব জরুরি HTTP থেকে HTTPS এ ডেটা পাঠানোর জন্য
         webSettings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
 
         webView.setWebChromeClient(new WebChromeClient());
@@ -74,8 +94,28 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        webView.loadUrl("http://10.24.1.71/flo-lite/");
+        webView.loadUrl(FLO_URL);
 
+        // ---------- Hidden WebView (Kratos) ----------
+        kratosView = new WebView(this);
+        WebSettings ks = kratosView.getSettings();
+        ks.setJavaScriptEnabled(true);
+        ks.setDomStorageEnabled(true);
+        ks.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        kratosView.setWebChromeClient(new WebChromeClient());
+        kratosView.addJavascriptInterface(new WebAppInterface(), "AndroidApp");
+        kratosView.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                if (pendingItems != null && !checkStarted && url != null && url.startsWith("http://10.83.32.70/kratos")) {
+                    runKratosCheck();
+                }
+            }
+        });
+        addContentView(kratosView, new ViewGroup.LayoutParams(1, 1));
+
+        // ---------- Buttons ----------
         btnGo.setOnClickListener(v -> {
             String toteId = toteInput.getText().toString().trim().toUpperCase();
             if (toteId.isEmpty()) {
@@ -108,13 +148,19 @@ public class MainActivity extends AppCompatActivity {
             scannerSection.setVisibility(View.VISIBLE);
             btnCloseChecking.setVisibility(View.GONE);
             toteInput.setText("");
-            webView.loadUrl("http://10.24.1.71/flo-lite/");
+            pendingItems = null;
+            webView.loadUrl(FLO_URL);
         });
     }
 
+    private void toast(String m, boolean longer) {
+        Toast.makeText(this, m, longer ? Toast.LENGTH_LONG : Toast.LENGTH_SHORT).show();
+    }
+
+    // ================= STEP 1: Flo-lite data (main WebView, flo-lite origin) =================
     private void injectMasterScript(String toteId) {
-        // এখানে জাভাস্ক্রিপ্টে আরও বেটার এরর হ্যান্ডলিং এবং ফেচ অপশন দেওয়া হয়েছে
-        String js = "javascript:(async function(){ " +
+        // NOTE: এই string এর ভিতরে কখনো // comment দেবে না (সব এক লাইন হয়ে যায়)
+        String js = "(async function(){ " +
                 "try { " +
                 "   if(window.AndroidApp) window.AndroidApp.showLoading('Fetching Flo-lite data...'); " +
                 "   let tote = '" + toteId + "'; " +
@@ -135,7 +181,7 @@ public class MainActivity extends AppCompatActivity {
                 "   } " +
                 "   let h = getHeaders(); " +
                 "   let r1 = await fetch(`${O}/inbound-apollo-flo-lite-routes-api/inbound-flo-lite-proxy-new/api/v2/putlists/container-details?containerLabel=${tote}`, {method:'GET',headers:h,credentials:'include'}); " +
-                "   if(!r1.ok) throw new Error('Tote not found in Flo-lite or Session Expired'); " +
+                "   if(!r1.ok) throw new Error('Tote not found in Flo-lite or Session Expired (HTTP '+r1.status+')'); " +
                 "   let d1 = await r1.json(); " +
                 "   let pid = d1?.putlist_details?.display_id || ''; " +
                 "   let items = d1?.item_details || []; " +
@@ -170,45 +216,143 @@ public class MainActivity extends AppCompatActivity {
                 "       let img = String(it3?.product?.high_res_image_url || item.product?.high_res_image_url || r2img || '').replace(/\"/g,''); " +
                 "       allItems.push({fsn:fsn||'N/A', product_name:title||'Unknown', image_url:img, wid:wid, quantity:qty, created_by:cby}); " +
                 "   } " +
-                "   if(window.AndroidApp) window.AndroidApp.showLoading('Checking Tagloop Eligibility (Kratos)...'); " +
-                "   let tagloopEligibleItems = []; " +
-                "   for(let item of allItems) { " +
-                "       let fsn = item.fsn; " +
-                "       if(!fsn || fsn === 'N/A') continue; " +
-                "       try { " +
-                "           let kr = await fetch(`http://10.83.32.70/kratos/product/lookup?fsn=${encodeURIComponent(fsn)}`, {method: 'GET', credentials:'omit'}); " + // Changed credentials here
-                "           if(kr.ok) { " +
-                "               let html = await kr.text(); " +
-                "               let match = html.match(/class=[\"']bold[\"'][^>]*>\\s*tagloop_eligible\\s*<\\/td>\\s*<td[^>]*>\\s*(?:<div[^>]*>)?\\s*([^<\\s]+)/i); " +
-                "               if(match && match[1].toUpperCase() === 'TRUE') { " +
-                "                   tagloopEligibleItems.push(item); " +
-                "               } " +
-                "           } " +
-                "       } catch(e) { console.error('Kratos Fetch Error:', e); } " +
-                "   } " +
-                "   if(tagloopEligibleItems.length === 0) throw new Error('No Tagloop Eligible items found in this Tote!'); " +
-                "   if(window.AndroidApp) window.AndroidApp.showLoading('Opening Dashboard...'); " +
-                "   let payload = {tote_id:tote, putlist_id:pid, items:tagloopEligibleItems}; " +
-                "   let gasUrl = 'https://script.google.com/a/macros/flipkart.com/s/AKfycbzxNqnX1HrawsRVwBX33ZEscXY6OX-tomn4dPWEQLDtrfmv30q9gJFktJPtDE_5bpI_/exec'; " +
-                "   window.location.href = gasUrl + '?data=' + encodeURIComponent(JSON.stringify(payload)); " +
+                "   window.AndroidApp.onFloData(tote, pid, JSON.stringify(allItems)); " +
                 "} catch(e) { " +
                 "   if(window.AndroidApp) window.AndroidApp.showError(e.message); " +
                 "   else alert(e.message); " +
                 "} " +
                 "})();";
-        
+
         webView.evaluateJavascript(js, null);
+    }
+
+    // ================= STEP 2: Kratos check (hidden WebView, kratos origin) =================
+    private void startKratos(String tote, String pid, String itemsJson) {
+        try {
+            pendingItems = new JSONArray(itemsJson);
+        } catch (Exception e) {
+            toast("Flo-lite data parse error", true);
+            return;
+        }
+        pendingTote = tote;
+        pendingPutlist = pid;
+        checkStarted = false;
+        toast("Checking Tagloop Eligibility (Kratos)...", false);
+        kratosView.loadUrl(KRATOS_URL);
+    }
+
+    private void runKratosCheck() {
+        checkStarted = true;
+
+        JSONArray fsns = new JSONArray();
+        HashSet<String> seen = new HashSet<>();
+        for (int i = 0; i < pendingItems.length(); i++) {
+            JSONObject it = pendingItems.optJSONObject(i);
+            String f = (it == null) ? "" : it.optString("fsn", "");
+            if (!f.isEmpty() && !f.equals("N/A") && seen.add(f)) {
+                fsns.put(f);
+            }
+        }
+        if (fsns.length() == 0) {
+            pendingItems = null;
+            toast("No FSN found in Tote", true);
+            return;
+        }
+
+        // তোমার PC bookmarklet #2 এর same logic (relative URL = same-origin)
+        String js = "(async function(){try{" +
+                "const fsns=" + fsns.toString() + ";" +
+                "const res={};let next=0;" +
+                "async function one(fsn){let last='ERR';" +
+                "for(let a=0;a<3;a++){try{" +
+                "const r=await fetch('/kratos/product/lookup?fsn='+encodeURIComponent(fsn),{credentials:'include'});" +
+                "if(r.ok){const h=await r.text();" +
+                "const x=h.match(/class=[\"']bold[\"'][^>]*>\\s*tagloop_eligible\\s*<\\/td>\\s*<td[^>]*>\\s*(?:<div[^>]*>)?\\s*([^<\\s]+)/i);" +
+                "if(x)return x[1].toUpperCase()==='TRUE'?'TRUE':'FALSE';return 'NOFIELD';}" +
+                "last='HTTP '+r.status;}catch(e){last='ERR';}}return last;}" +
+                "async function w(){while(next<fsns.length){const i=next++;res[fsns[i]]=await one(fsns[i]);}}" +
+                "await Promise.all(Array.from({length:Math.min(10,fsns.length)},w));" +
+                "AndroidApp.onKratosResult(JSON.stringify(res));" +
+                "}catch(e){AndroidApp.onKratosError(String(e&&e.message));}})();";
+
+        kratosView.evaluateJavascript(js, null);
+    }
+
+    // ================= STEP 3: merge + Dashboard =================
+    private void finishFlow(String json) {
+        try {
+            JSONObject res = new JSONObject(json);
+            JSONArray eligible = new JSONArray();
+            int valid = 0;
+            for (int i = 0; i < pendingItems.length(); i++) {
+                JSONObject it = pendingItems.optJSONObject(i);
+                if (it == null) continue;
+                String r = res.optString(it.optString("fsn", ""), "");
+                if (r.equals("TRUE")) {
+                    eligible.put(it);
+                    valid++;
+                } else if (r.equals("FALSE")) {
+                    valid++;
+                }
+            }
+
+            if (valid == 0) {
+                // কোনো FSN এর বৈধ উত্তর আসেনি = Kratos login/session নেই
+                pendingItems = null;
+                toast("Kratos session nai. Login kore Close chapo, tarpor abar GO dao", true);
+                scannerSection.setVisibility(View.GONE);
+                btnCloseChecking.setVisibility(View.VISIBLE);
+                webView.loadUrl(KRATOS_URL);
+                return;
+            }
+            if (eligible.length() == 0) {
+                pendingItems = null;
+                toast("No Tagloop Eligible items found in this Tote!", true);
+                return;
+            }
+
+            JSONObject payload = new JSONObject();
+            payload.put("tote_id", pendingTote);
+            payload.put("putlist_id", pendingPutlist);
+            payload.put("items", eligible);
+            pendingItems = null;
+
+            toast("Opening Dashboard...", false);
+            String enc = URLEncoder.encode(payload.toString(), "UTF-8").replace("+", "%20");
+            webView.loadUrl(GAS_URL + "?data=" + enc);
+        } catch (Exception e) {
+            pendingItems = null;
+            toast("Error: " + e.getMessage(), true);
+        }
     }
 
     public class WebAppInterface {
         @JavascriptInterface
         public void showLoading(String message) {
-            runOnUiThread(() -> Toast.makeText(MainActivity.this, message, Toast.LENGTH_SHORT).show());
+            runOnUiThread(() -> toast(message, false));
         }
 
         @JavascriptInterface
         public void showError(String message) {
-            runOnUiThread(() -> Toast.makeText(MainActivity.this, "Error: " + message, Toast.LENGTH_LONG).show());
+            runOnUiThread(() -> toast("Error: " + message, true));
+        }
+
+        @JavascriptInterface
+        public void onFloData(String tote, String pid, String itemsJson) {
+            runOnUiThread(() -> startKratos(tote, pid, itemsJson));
+        }
+
+        @JavascriptInterface
+        public void onKratosResult(String json) {
+            runOnUiThread(() -> finishFlow(json));
+        }
+
+        @JavascriptInterface
+        public void onKratosError(String m) {
+            runOnUiThread(() -> {
+                pendingItems = null;
+                toast("Kratos error: " + m, true);
+            });
         }
     }
 }
