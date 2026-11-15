@@ -30,6 +30,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.net.URLEncoder;
+import java.util.Arrays;
 import java.util.HashSet;
 
 public class MainActivity extends AppCompatActivity {
@@ -37,6 +38,27 @@ public class MainActivity extends AppCompatActivity {
     private static final String FLO_URL = "http://10.24.1.71/flo-lite/";
     private static final String KRATOS_URL = "http://10.83.32.70/kratos/";
     private static final String GAS_URL = "https://script.google.com/a/macros/flipkart.com/s/AKfycbzxNqnX1HrawsRVwBX33ZEscXY6OX-tomn4dPWEQLDtrfmv30q9gJFktJPtDE_5bpI_/exec";
+
+    // সব facility (তোমার Tracking bookmarklet থেকে)। প্রথমে ulub_bts চেষ্টা হবে।
+    private static final String[] FACILITIES = new String[]{
+            "nad_har_wh_kl_nl_01nl", "gur_san_wh_nl_01nl", "pit_dha_al_swa_nl_01nl", "nag_rtm_wh_nl_01nl",
+            "frk_bts", "cbe_oth_01", "bhi_pad_wh_nl_01nl", "ran_mfc_wh_nl_01nl", "vij_ved_wh_nl_01nl",
+            "malur_bts", "ind_teh_wh_nl_01nl", "bhi_vas_wh_nl_01nl", "ban_ven_wh_nl_01nl",
+            "guw_kam_wh_nl_02nl", "luc_has_wh_nl_02nl", "ulub_bts", "chn_tvr_04", "hyderabad_medchal_01",
+            "ahm_khe_wh_nl_01nl", "lud_kha_wh_nl_01nl", "jai_san_wh_nl_01nl", "jal_bin_wh_nl_01nl",
+            "bhu_pan_wh_nl_01nl", "pat_haj_wh_nl_01nl", "pun_bad_wh_nl_01nl", "bhi_sse_wh_nl_01nl",
+            "var_mfc_wh_nl_01nl", "rai_dha_wh_nl_02nl", "gur_bho_al_adi_nl_01nl", "sur_mfc_wh_nl_01nl",
+            "gur_gop_al_emi_nl_01nl", "ben_kat_al_ema_nl_01nl", "mal_ban_al_fat_nl_01nl",
+            "dha_mol_al_ema_nl_03nl", "ban_may_al_bra_nl_01nl", "coc_mfc_wh_nl_01nl", "grk_mfc_wh_nl_01nl",
+            "ban_may_al_bra_nl_02nl", "bhi_tha_al_emi_nl_01nl", "gur_sam_al_abr_nl_01nl",
+            "new_ham_al_glo_nl_01nl", "kol_gab_3pl_g_01", "hyd_dev_al_dro_nl_02nl", "dha_kot_wh_nl_01nl",
+            "ind_las_al_bum_nl_01nl", "kal_gur_wh_kl_nl_01nl", "how_arg_al_wil_nl_01nl",
+            "ban_ban_al_ind_nl_01nl", "ban_mal_al_ban_nl_01nl", "kur_moh_al_pir_nl_01nl",
+            "bhi_mum_al_dro_nl_01nl", "jab_mfc_wh_nl_01nl", "kol_sal_al_dol_nl_01nl",
+            "how_san_al_emi_nl_01nl", "del_bud_al_ban_nl_02nl", "bhi_tha_al_ema_nl_01nl",
+            "kol_how_al_rak_nl_01nl", "har_jha_al_fat_nl_01nl", "kol_how_al_nex_nl_03nl",
+            "tir_ang_al_dol_nl_02nl"
+    };
 
     private EditText toteInput;
     private ImageButton btnScan;
@@ -67,7 +89,6 @@ public class MainActivity extends AppCompatActivity {
             ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.CAMERA}, 100);
         }
 
-        // PC Chrome এর chrome://inspect থেকে console দেখার জন্য
         WebView.setWebContentsDebuggingEnabled(true);
 
         // ---------- Main WebView (Flo-lite) ----------
@@ -159,14 +180,23 @@ public class MainActivity extends AppCompatActivity {
 
     // ================= STEP 1: Flo-lite data (main WebView, flo-lite origin) =================
     private void injectMasterScript(String toteId) {
+        String facsJson = new JSONArray(Arrays.asList(FACILITIES)).toString();
+
         // NOTE: এই string এর ভিতরে কখনো // comment দেবে না (সব এক লাইন হয়ে যায়)
         String js = "(async function(){ " +
                 "try { " +
                 "   if(window.AndroidApp) window.AndroidApp.showLoading('Fetching Flo-lite data...'); " +
-                "   let tote = '" + toteId + "'; " +
+                "   let tote = '" + toteId.replace("'", "") + "'; " +
                 "   let O = 'http://10.24.1.71'; " +
-                "   let getHeaders = () => { " +
-                "       let fac = (window.location.pathname.match(/\\/flo-lite\\/([^\\/]+)\\//)||[])[1] || localStorage.getItem('facilityId') || ''; " +
+                "   let facs = " + facsJson + "; " +
+                "   function getFac(){ " +
+                "       let p = location.pathname; " +
+                "       let m = p.match(/\\/flo-lite\\/([^\\/?#]+)/i) || p.match(/\\/([^\\/]+)\\/(?:desktop|mobile)(?:\\/|$)/i); " +
+                "       if(m) return decodeURIComponent(m[1]); " +
+                "       let q = new URLSearchParams(location.search); " +
+                "       return q.get('facility_id') || q.get('facilityId') || localStorage.getItem('facilityId') || null; " +
+                "   } " +
+                "   let getHeaders = (fac) => { " +
                 "       let ck = document.cookie.match(/(?:csrf-token|XSRF-TOKEN|_csrf)=([^;]+)/); " +
                 "       let csrf = document.querySelector('meta[name=\"csrf-token\"]')?.content || localStorage.getItem('csrf-token') || (ck?decodeURIComponent(ck[1]):'') || ''; " +
                 "       let headers = {'accept':'application/json','content-type':'application/json','x-tenant-id':'FKI','x-client-id':'WH','x-requested-by':'auto_extractor','x-facility-id':fac}; " +
@@ -179,10 +209,21 @@ public class MainActivity extends AppCompatActivity {
                 "       for(let key in obj){ let val=getV(obj[key],k); if(val!==null) return val; } " +
                 "       return null; " +
                 "   } " +
-                "   let h = getHeaders(); " +
-                "   let r1 = await fetch(`${O}/inbound-apollo-flo-lite-routes-api/inbound-flo-lite-proxy-new/api/v2/putlists/container-details?containerLabel=${tote}`, {method:'GET',headers:h,credentials:'include'}); " +
-                "   if(!r1.ok) throw new Error('Tote not found in Flo-lite or Session Expired (HTTP '+r1.status+')'); " +
-                "   let d1 = await r1.json(); " +
+                "   let cFac = getFac(); " +
+                "   let first = cFac ? cFac : 'ulub_bts'; " +
+                "   let fList = [first].concat(facs.filter(x=>x!==first)); " +
+                "   let h = null; let d1 = null; let lastErr = ''; " +
+                "   for(let f of fList){ " +
+                "       try{ " +
+                "           let hh = getHeaders(f); " +
+                "           let rr = await fetch(`${O}/inbound-apollo-flo-lite-routes-api/inbound-flo-lite-proxy-new/api/v2/putlists/container-details?containerLabel=${tote}`, {method:'GET',headers:hh,credentials:'include'}); " +
+                "           if(!rr.ok){ lastErr='HTTP '+rr.status+' fac='+f; continue; } " +
+                "           let dd = await rr.json(); " +
+                "           if((dd?.item_details||[]).length>0){ h=hh; d1=dd; break; } " +
+                "           lastErr='no items fac='+f; " +
+                "       }catch(e){ lastErr=String(e&&e.message)+' fac='+f; } " +
+                "   } " +
+                "   if(!d1) throw new Error('Tote not found in any facility or Session Expired | last: '+lastErr); " +
                 "   let pid = d1?.putlist_details?.display_id || ''; " +
                 "   let items = d1?.item_details || []; " +
                 "   let d3 = d1?.audit_details ? d1 : null; " +
@@ -199,22 +240,23 @@ public class MainActivity extends AppCompatActivity {
                 "       let qty = item.quantity || 0; " +
                 "       let fsn = item.product?.fsn || ''; " +
                 "       let title = (item.product?.title || '').replace(/\"/g,''); " +
+                "       let category = item.product?.category || ''; " +
                 "       let r2img = null; " +
-                "       if(!title && wid){ " +
+                "       if((!title || !category || !fsn) && wid){ " +
                 "           try{ " +
                 "               let r2 = await fetch(`${O}/hyperlocal-flo-lite-api/inbound-proxy/api/v1/commons/fetch_product_details`, {method:'POST',headers:h,credentials:'include',body:JSON.stringify({wid:wid,fsn:fsn})}); " +
                 "               if(r2.ok){ " +
                 "                   let d2 = await r2.json(); " +
                 "                   let prod = Array.isArray(d2) ? d2[0]?.products : d2?.products; " +
                 "                   r2img = getV(d2,'high_res_image_url'); " +
-                "                   if(prod){ fsn = prod.fsn || fsn; title = (prod.title || title).replace(/\"/g,''); } " +
+                "                   if(prod){ fsn = prod.fsn || fsn; title = (prod.title || title).replace(/\"/g,''); category = prod.vertical || prod.category || category; } " +
                 "               } " +
                 "           }catch(e){} " +
                 "       } " +
                 "       let it3 = (d3?.item_details||[]).find(x=>(x.item_label||x.derived_item_label)===wid); " +
                 "       let cby = String(d3?.audit_details?.created_by || d1?.audit_details?.created_by || '').replace(/\"/g,''); " +
                 "       let img = String(it3?.product?.high_res_image_url || item.product?.high_res_image_url || r2img || '').replace(/\"/g,''); " +
-                "       allItems.push({fsn:fsn||'N/A', product_name:title||'Unknown', image_url:img, wid:wid, quantity:qty, created_by:cby}); " +
+                "       allItems.push({fsn:fsn||'N/A', product_name:title||'Unknown', image_url:img, wid:wid, vertical:category, quantity:qty, created_by:cby}); " +
                 "   } " +
                 "   window.AndroidApp.onFloData(tote, pid, JSON.stringify(allItems)); " +
                 "} catch(e) { " +
@@ -268,7 +310,7 @@ public class MainActivity extends AppCompatActivity {
                 "const r=await fetch('/kratos/product/lookup?fsn='+encodeURIComponent(fsn),{credentials:'include'});" +
                 "if(r.ok){const h=await r.text();" +
                 "const x=h.match(/class=[\"']bold[\"'][^>]*>\\s*tagloop_eligible\\s*<\\/td>\\s*<td[^>]*>\\s*(?:<div[^>]*>)?\\s*([^<\\s]+)/i);" +
-                "if(x)return x[1].toUpperCase()==='TRUE'?'TRUE':'FALSE';return 'NOFIELD';}" +
+                "if(x)return x[1].toUpperCase()==='TRUE'?'TRUE':'FALSE';return /Identifying Attributes|Other Product Attributes/i.test(h)?'FALSE':'NOFIELD';}" +
                 "last='HTTP '+r.status;}catch(e){last='ERR';}}return last;}" +
                 "async function w(){while(next<fsns.length){const i=next++;res[fsns[i]]=await one(fsns[i]);}}" +
                 "await Promise.all(Array.from({length:Math.min(10,fsns.length)},w));" +
@@ -297,7 +339,6 @@ public class MainActivity extends AppCompatActivity {
             }
 
             if (valid == 0) {
-                // কোনো FSN এর বৈধ উত্তর আসেনি = Kratos login/session নেই
                 pendingItems = null;
                 toast("Kratos session nai. Login kore Close chapo, tarpor abar GO dao", true);
                 scannerSection.setVisibility(View.GONE);
