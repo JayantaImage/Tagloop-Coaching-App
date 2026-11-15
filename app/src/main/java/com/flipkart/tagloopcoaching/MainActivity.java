@@ -55,7 +55,7 @@ public class MainActivity extends AppCompatActivity {
         webSettings.setDomStorageEnabled(true);
         webSettings.setAllowFileAccess(true);
         webSettings.setMediaPlaybackRequiresUserGesture(false);
-        // দুটো আলাদা সার্ভার (Mixed Content) যাতে ব্লক না হয় তার জন্য এই লাইনটা দেওয়া হলো
+        // এই লাইনটা খুব জরুরি HTTP থেকে HTTPS এ ডেটা পাঠানোর জন্য
         webSettings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
 
         webView.setWebChromeClient(new WebChromeClient());
@@ -74,7 +74,6 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // শুরুতে ফ্লো-লাইটের পেজ লোড হবে
         webView.loadUrl("http://10.24.1.71/flo-lite/");
 
         btnGo.setOnClickListener(v -> {
@@ -86,7 +85,6 @@ public class MainActivity extends AppCompatActivity {
             injectMasterScript(toteId);
         });
 
-        // Google Play Services Scanner Setup (Native & Fast)
         GmsBarcodeScannerOptions options = new GmsBarcodeScannerOptions.Builder()
                 .setBarcodeFormats(Barcode.FORMAT_ALL_FORMATS)
                 .enableAutoZoom()
@@ -114,8 +112,8 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    // মাস্টার জাভাস্ক্রিপ্ট (Flo-lite এবং Kratos দুটোর ডেটাই একসাথে আনবে)
     private void injectMasterScript(String toteId) {
+        // এখানে জাভাস্ক্রিপ্টে আরও বেটার এরর হ্যান্ডলিং এবং ফেচ অপশন দেওয়া হয়েছে
         String js = "javascript:(async function(){ " +
                 "try { " +
                 "   if(window.AndroidApp) window.AndroidApp.showLoading('Fetching Flo-lite data...'); " +
@@ -178,8 +176,7 @@ public class MainActivity extends AppCompatActivity {
                 "       let fsn = item.fsn; " +
                 "       if(!fsn || fsn === 'N/A') continue; " +
                 "       try { " +
-                "           // এখানে ক্র্যাটোসের সঠিক IP দেওয়া হলো (10.83.32.70) " +
-                "           let kr = await fetch(`http://10.83.32.70/kratos/product/lookup?fsn=${encodeURIComponent(fsn)}`, {credentials:'include'}); " +
+                "           let kr = await fetch(`http://10.83.32.70/kratos/product/lookup?fsn=${encodeURIComponent(fsn)}`, {method: 'GET', credentials:'omit'}); " + // Changed credentials here
                 "           if(kr.ok) { " +
                 "               let html = await kr.text(); " +
                 "               let match = html.match(/class=[\"']bold[\"'][^>]*>\\s*tagloop_eligible\\s*<\\/td>\\s*<td[^>]*>\\s*(?:<div[^>]*>)?\\s*([^<\\s]+)/i); " +
@@ -187,7 +184,7 @@ public class MainActivity extends AppCompatActivity {
                 "                   tagloopEligibleItems.push(item); " +
                 "               } " +
                 "           } " +
-                "       } catch(e) {} " +
+                "       } catch(e) { console.error('Kratos Fetch Error:', e); } " +
                 "   } " +
                 "   if(tagloopEligibleItems.length === 0) throw new Error('No Tagloop Eligible items found in this Tote!'); " +
                 "   if(window.AndroidApp) window.AndroidApp.showLoading('Opening Dashboard...'); " +
