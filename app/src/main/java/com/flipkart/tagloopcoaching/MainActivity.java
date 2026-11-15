@@ -2,7 +2,6 @@ package com.flipkart.tagloopcoaching;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
-import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.view.View;
@@ -17,13 +16,14 @@ import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.Toast;
 
-import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
-import com.google.zxing.integration.android.IntentIntegrator;
-import com.google.zxing.integration.android.IntentResult;
+import com.google.mlkit.vision.barcode.common.Barcode;
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanner;
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions;
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -39,7 +39,6 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // UI ইলিমেন্ট লিঙ্ক
         toteInput = findViewById(R.id.toteInput);
         btnScan = findViewById(R.id.btnScan);
         btnGo = findViewById(R.id.btnGo);
@@ -47,17 +46,17 @@ public class MainActivity extends AppCompatActivity {
         webView = findViewById(R.id.webView);
         scannerSection = findViewById(R.id.scannerSection);
 
-        // ক্যামেরা পারমিশন
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.CAMERA}, 100);
         }
 
-        // WebView সেটআপ
         WebSettings webSettings = webView.getSettings();
         webSettings.setJavaScriptEnabled(true);
         webSettings.setDomStorageEnabled(true);
         webSettings.setAllowFileAccess(true);
         webSettings.setMediaPlaybackRequiresUserGesture(false);
+        // দুটো আলাদা সার্ভার (Mixed Content) যাতে ব্লক না হয় তার জন্য এই লাইনটা দেওয়া হলো
+        webSettings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
 
         webView.setWebChromeClient(new WebChromeClient());
         webView.addJavascriptInterface(new WebAppInterface(), "AndroidApp");
@@ -75,9 +74,9 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        webView.loadUrl("http://10.24.1.71");
+        // শুরুতে ফ্লো-লাইটের পেজ লোড হবে
+        webView.loadUrl("http://10.24.1.71/flo-lite/");
 
-        // GO বাটনের লজিক
         btnGo.setOnClickListener(v -> {
             String toteId = toteInput.getText().toString().trim().toUpperCase();
             if (toteId.isEmpty()) {
@@ -87,50 +86,41 @@ public class MainActivity extends AppCompatActivity {
             injectMasterScript(toteId);
         });
 
-        // স্ক্যান বাটনের লজিক (ZXing Scanner)
+        // Google Play Services Scanner Setup (Native & Fast)
+        GmsBarcodeScannerOptions options = new GmsBarcodeScannerOptions.Builder()
+                .setBarcodeFormats(Barcode.FORMAT_ALL_FORMATS)
+                .enableAutoZoom()
+                .build();
+        GmsBarcodeScanner scanner = GmsBarcodeScanning.getClient(this, options);
+
         btnScan.setOnClickListener(v -> {
-            IntentIntegrator integrator = new IntentIntegrator(MainActivity.this);
-            integrator.setDesiredBarcodeFormats(IntentIntegrator.ALL_CODE_TYPES);
-            integrator.setPrompt("Scan a Tote ID");
-            integrator.setCameraId(0);
-            integrator.setBeepEnabled(true);
-            integrator.setBarcodeImageEnabled(false);
-            integrator.setOrientationLocked(false);
-            integrator.initiateScan();
+            scanner.startScan()
+                    .addOnSuccessListener(barcode -> {
+                        String scannedId = barcode.getRawValue();
+                        if (scannedId != null) {
+                            toteInput.setText(scannedId.trim());
+                        }
+                    })
+                    .addOnFailureListener(e -> {
+                        Toast.makeText(MainActivity.this, "Scan Failed", Toast.LENGTH_SHORT).show();
+                    });
         });
 
-        // Close বাটনের লজিক
         btnCloseChecking.setOnClickListener(v -> {
             scannerSection.setVisibility(View.VISIBLE);
             btnCloseChecking.setVisibility(View.GONE);
             toteInput.setText("");
-            webView.loadUrl("http://10.24.1.71");
+            webView.loadUrl("http://10.24.1.71/flo-lite/");
         });
     }
 
-    // স্ক্যানারের রেজাল্ট ধরা
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
-        IntentResult result = IntentIntegrator.parseActivityResult(requestCode, resultCode, data);
-        if (result != null) {
-            if (result.getContents() != null) {
-                String scannedId = result.getContents().trim();
-                toteInput.setText(scannedId);
-                // অপশনাল: স্ক্যান হলেই অটোমেটিক GO কল করতে চাইলে নিচের লাইনটা আনকমেন্ট করে দেবেন
-                // injectMasterScript(scannedId);
-            }
-        } else {
-            super.onActivityResult(requestCode, resultCode, data);
-        }
-    }
-
-    // মাস্টার জাভাস্ক্রিপ্ট ইনজেকশন
+    // মাস্টার জাভাস্ক্রিপ্ট (Flo-lite এবং Kratos দুটোর ডেটাই একসাথে আনবে)
     private void injectMasterScript(String toteId) {
         String js = "javascript:(async function(){ " +
                 "try { " +
                 "   if(window.AndroidApp) window.AndroidApp.showLoading('Fetching Flo-lite data...'); " +
                 "   let tote = '" + toteId + "'; " +
-                "   let O = window.location.origin; " +
+                "   let O = 'http://10.24.1.71'; " +
                 "   let getHeaders = () => { " +
                 "       let fac = (window.location.pathname.match(/\\/flo-lite\\/([^\\/]+)\\//)||[])[1] || localStorage.getItem('facilityId') || ''; " +
                 "       let ck = document.cookie.match(/(?:csrf-token|XSRF-TOKEN|_csrf)=([^;]+)/); " +
@@ -147,7 +137,7 @@ public class MainActivity extends AppCompatActivity {
                 "   } " +
                 "   let h = getHeaders(); " +
                 "   let r1 = await fetch(`${O}/inbound-apollo-flo-lite-routes-api/inbound-flo-lite-proxy-new/api/v2/putlists/container-details?containerLabel=${tote}`, {method:'GET',headers:h,credentials:'include'}); " +
-                "   if(!r1.ok) throw new Error('Tote not found or Session Expired'); " +
+                "   if(!r1.ok) throw new Error('Tote not found in Flo-lite or Session Expired'); " +
                 "   let d1 = await r1.json(); " +
                 "   let pid = d1?.putlist_details?.display_id || ''; " +
                 "   let items = d1?.item_details || []; " +
@@ -188,7 +178,8 @@ public class MainActivity extends AppCompatActivity {
                 "       let fsn = item.fsn; " +
                 "       if(!fsn || fsn === 'N/A') continue; " +
                 "       try { " +
-                "           let kr = await fetch(`${O}/kratos/product/lookup?fsn=${encodeURIComponent(fsn)}`, {credentials:'include'}); " +
+                "           // এখানে ক্র্যাটোসের সঠিক IP দেওয়া হলো (10.83.32.70) " +
+                "           let kr = await fetch(`http://10.83.32.70/kratos/product/lookup?fsn=${encodeURIComponent(fsn)}`, {credentials:'include'}); " +
                 "           if(kr.ok) { " +
                 "               let html = await kr.text(); " +
                 "               let match = html.match(/class=[\"']bold[\"'][^>]*>\\s*tagloop_eligible\\s*<\\/td>\\s*<td[^>]*>\\s*(?:<div[^>]*>)?\\s*([^<\\s]+)/i); " +
