@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#F4F6F8">
+
+    <!-- Top Scanner Section (Visible initially) -->
+    <LinearLayout
+        android:id="@+id/scannerSection"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="12dp"
+        android:background="#FFFFFF"
+        android:elevation="6dp"
+        android:gravity="center_vertical">
+
+        <!-- Input Box for Tote ID -->
+        <EditText
+            android:id="@+id/toteInput"
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1"
+            android:background="@android:drawable/editbox_background_normal"
+            android:hint="Scan or Type Tote ID"
+            android:inputType="textCapCharacters"
+            android:paddingStart="12dp"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <!-- Camera Scan Button -->
+        <ImageButton
+            android:id="@+id/btnScan"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_marginStart="8dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:src="@android:drawable/ic_menu_camera"
+            android:tint="#2980B9" />
+
+        <!-- GO Button -->
+        <Button
+            android:id="@+id/btnGo"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:layout_marginStart="8dp"
+            android:text="GO"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#27AE60"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- WebView for Flo-lite & Apps Script Dashboard -->
+    <WebView
+        android:id="@+id/webView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_below="@id/scannerSection" />
+
+    <!-- Close Checking Button (Hidden initially, will show when Apps Script opens) -->
+    <Button
+        android:id="@+id/btnCloseChecking"
+        android:layout_width="match_parent"
+        android:layout_height="55dp"
+        android:layout_alignParentTop="true"
+        android:text="CLOSE CHECKING &amp; NEW SCAN"
+        android:textColor="#FFFFFF"
+        android:backgroundTint="#C0392B"
+        android:textStyle="bold"
+        android:textSize="16sp"
+        android:visibility="gone"
+        android:elevation="8dp"/>
+
+</RelativeLayout>
