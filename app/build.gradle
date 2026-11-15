@@ -30,6 +30,6 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'com.google.android.material:material:1.11.0'
     
-    // Barcode & QR Code Scanner Library (ZXing)
-    implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
+    // Google Play Services Code Scanner (Fast & Native)
+    implementation 'com.google.android.gms:play-services-code-scanner:16.1.0'
 }
