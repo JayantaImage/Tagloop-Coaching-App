@@ -68,7 +68,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         // PC Chrome এর chrome://inspect থেকে console দেখার জন্য
-        WebView.setWebContentsDebugging(true);
+        WebView.setWebContentsDebuggingEnabled(true);
 
         // ---------- Main WebView (Flo-lite) ----------
         WebSettings webSettings = webView.getSettings();
