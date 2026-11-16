@@ -2,11 +2,18 @@ package com.flipkart.tagloopcoaching;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
+import android.content.ContentValues;
+import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.provider.MediaStore;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
+import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -17,6 +24,8 @@ import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.Toast;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
@@ -72,6 +81,29 @@ public class MainActivity extends AppCompatActivity {
     private String pendingPutlist = "";
     private boolean checkStarted = false;
 
+    // ---- Camera / file chooser (Take Picture button) ----
+    private ValueCallback<Uri[]> fileCallback;
+    private Uri cameraUri;
+    private final ActivityResultLauncher<Intent> fileLauncher = registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(), result -> {
+                if (fileCallback == null) return;
+                Uri[] res = null;
+                if (result.getResultCode() == RESULT_OK) {
+                    Intent d = result.getData();
+                    if (d != null && d.getData() != null) {
+                        res = new Uri[]{d.getData()};
+                    } else if (cameraUri != null) {
+                        res = new Uri[]{cameraUri};
+                    }
+                }
+                if (res == null && cameraUri != null) {
+                    try { getContentResolver().delete(cameraUri, null, null); } catch (Exception ignored) { }
+                }
+                fileCallback.onReceiveValue(res);
+                fileCallback = null;
+                cameraUri = null;
+            });
+
     @SuppressLint("SetJavaScriptEnabled")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -99,7 +131,51 @@ public class MainActivity extends AppCompatActivity {
         webSettings.setMediaPlaybackRequiresUserGesture(false);
         webSettings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
 
-        webView.setWebChromeClient(new WebChromeClient());
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onShowFileChooser(WebView w, ValueCallback<Uri[]> cb, FileChooserParams p) {
+                if (fileCallback != null) fileCallback.onReceiveValue(null);
+                fileCallback = cb;
+                cameraUri = null;
+                try {
+                    Intent cam = null;
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        ContentValues cv = new ContentValues();
+                        cv.put(MediaStore.Images.Media.DISPLAY_NAME, "tagloop_" + System.currentTimeMillis() + ".jpg");
+                        cv.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+                        cv.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/TagloopCoaching");
+                        cameraUri = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cv);
+                        if (cameraUri != null) {
+                            cam = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+                            cam.putExtra(MediaStore.EXTRA_OUTPUT, cameraUri);
+                        }
+                    }
+                    boolean wantsImage = p.isCaptureEnabled();
+                    for (String t : p.getAcceptTypes()) {
+                        if (t != null && t.startsWith("image")) wantsImage = true;
+                    }
+                    Intent launch;
+                    if (cam != null && wantsImage) {
+                        launch = cam;
+                    } else {
+                        launch = Intent.createChooser(p.createIntent(), "Select");
+                        if (cam != null) launch.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[]{cam});
+                    }
+                    fileLauncher.launch(launch);
+                } catch (Exception e) {
+                    fileCallback = null;
+                    cameraUri = null;
+                    cb.onReceiveValue(null);
+                    toast("Camera open hoy ni: " + e.getMessage(), true);
+                }
+                return true;
+            }
+
+            @Override
+            public void onPermissionRequest(PermissionRequest request) {
+                runOnUiThread(() -> request.grant(request.getResources()));
+            }
+        });
         webView.addJavascriptInterface(new WebAppInterface(), "AndroidApp");
 
         webView.setWebViewClient(new WebViewClient() {
@@ -107,10 +183,7 @@ public class MainActivity extends AppCompatActivity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 if (url != null && url.contains("script.google.com")) {
-                    runOnUiThread(() -> {
-                        scannerSection.setVisibility(View.GONE);
-                        btnCloseChecking.setVisibility(View.VISIBLE);
-                    });
+                    runOnUiThread(() -> setCheckingMode(true));
                 }
             }
         });
@@ -166,11 +239,23 @@ public class MainActivity extends AppCompatActivity {
         });
 
         btnCloseChecking.setOnClickListener(v -> {
-            scannerSection.setVisibility(View.VISIBLE);
-            btnCloseChecking.setVisibility(View.GONE);
+            setCheckingMode(false);
             toteInput.setText("");
             pendingItems = null;
             webView.loadUrl(FLO_URL);
+        });
+    }
+
+    // Close button দেখালে WebView টা তার নিচে নামে, যাতে header ঢাকা না পড়ে
+    private void setCheckingMode(boolean on) {
+        scannerSection.setVisibility(on ? View.GONE : View.VISIBLE);
+        btnCloseChecking.setVisibility(on ? View.VISIBLE : View.GONE);
+        btnCloseChecking.post(() -> {
+            ViewGroup.LayoutParams lp = webView.getLayoutParams();
+            if (lp instanceof ViewGroup.MarginLayoutParams) {
+                ((ViewGroup.MarginLayoutParams) lp).topMargin = on ? btnCloseChecking.getHeight() : 0;
+                webView.setLayoutParams(lp);
+            }
         });
     }
 
@@ -341,8 +426,7 @@ public class MainActivity extends AppCompatActivity {
             if (valid == 0) {
                 pendingItems = null;
                 toast("Kratos session nai. Login kore Close chapo, tarpor abar GO dao", true);
-                scannerSection.setVisibility(View.GONE);
-                btnCloseChecking.setVisibility(View.VISIBLE);
+                setCheckingMode(true);
                 webView.loadUrl(KRATOS_URL);
                 return;
             }
